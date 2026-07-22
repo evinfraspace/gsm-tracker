@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>GSM Tracker</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <style>
+        html, body { margin: 0; height: 100%; font-family: system-ui, sans-serif; }
+        #app { display: flex; flex-direction: column; height: 100%; }
+        header {
+            padding: 8px 12px; background: #1f2937; color: #fff;
+            display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+        }
+        header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+        header label { font-size: 13px; }
+        select, input, button {
+            font-size: 13px; padding: 4px 6px; border-radius: 4px; border: 1px solid #4b5563;
+        }
+        button { background: #2563eb; color: #fff; border: none; cursor: pointer; }
+        #status { font-size: 12px; color: #9ca3af; margin-left: auto; }
+        #map { flex: 1; }
+    </style>
+</head>
+<body>
+<div id="app">
+    <header>
+        <h1>GSM Tracker</h1>
+        <label>Устройство:
+            <select id="device"></select>
+        </label>
+        <label>Часов истории:
+            <input id="hours" type="number" value="24" min="1" max="720" style="width: 64px"/>
+        </label>
+        <button id="reload">Обновить</button>
+        <span id="status"></span>
+    </header>
+    <div id="map"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    const map = L.map('map').setView([55.751244, 37.618423], 11);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap'
+    }).addTo(map);
+
+    let trackLayer = null;
+    let marker = null;
+
+    const deviceSelect = document.getElementById('device');
+    const hoursInput = document.getElementById('hours');
+    const statusEl = document.getElementById('status');
+
+    function setStatus(text) { statusEl.textContent = text; }
+
+    async function loadDevices() {
+        const res = await fetch('/api/v1/devices');
+        const devices = await res.json();
+        deviceSelect.innerHTML = '';
+        for (const d of devices) {
+            const opt = document.createElement('option');
+            opt.value = d.id;
+            opt.textContent = `${d.name} (#${d.id})`;
+            deviceSelect.appendChild(opt);
+        }
+        if (devices.length > 0) {
+            await reload();
+        } else {
+            setStatus('Нет устройств');
+        }
+    }
+
+    function timeRange() {
+        const hours = Number(hoursInput.value) || 24;
+        const to = new Date();
+        const from = new Date(to.getTime() - hours * 3600 * 1000);
+        return { from: from.toISOString(), to: to.toISOString() };
+    }
+
+    async function reload() {
+        const id = deviceSelect.value;
+        if (!id) return;
+        const { from, to } = timeRange();
+
+        try {
+            const trackRes = await fetch(`/api/v1/devices/${id}/track?from=${from}&to=${to}`);
+            const geojson = await trackRes.json();
+            const coords = geojson.geometry.coordinates.map(c => [c[1], c[0]]); // [lat, lon]
+
+            if (trackLayer) map.removeLayer(trackLayer);
+            if (coords.length > 0) {
+                trackLayer = L.polyline(coords, { color: '#2563eb', weight: 4 }).addTo(map);
+                map.fitBounds(trackLayer.getBounds(), { padding: [30, 30] });
+            }
+
+            const latestRes = await fetch(`/api/v1/devices/${id}/positions/latest`);
+            if (latestRes.status === 200) {
+                const p = await latestRes.json();
+                const latlng = [p.lat, p.lon];
+                if (marker) map.removeLayer(marker);
+                marker = L.marker(latlng).addTo(map)
+                    .bindPopup(`Последняя точка<br>${new Date(p.recordedAt).toLocaleString()}`);
+                setStatus(`Точек: ${coords.length} · последняя: ${new Date(p.recordedAt).toLocaleString()}`);
+            } else {
+                setStatus(`Точек: ${coords.length} · последней позиции нет`);
+            }
+        } catch (e) {
+            setStatus('Ошибка загрузки: ' + e.message);
+        }
+    }
+
+    document.getElementById('reload').addEventListener('click', reload);
+    deviceSelect.addEventListener('change', reload);
+    setInterval(reload, 10000); // автообновление раз в 10 c
+
+    loadDevices();
+</script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5430/gsmtracker
+    username: gsm
+    password: gsm
+  jpa:
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+  flyway:
+    # dev applies an extra migration that seeds a demo device
+    locations: classpath:db/migration,classpath:db/migration-dev

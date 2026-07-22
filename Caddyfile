@@ -1,0 +1,7 @@
+# Caddy obtains and renews a Let's Encrypt certificate automatically for
+# SITE_ADDRESS (e.g. gsm-xxx.duckdns.org) as long as ports 80/443 are open
+# and the domain's A record points to this VPS.
+{$SITE_ADDRESS} {
+	encode gzip
+	reverse_proxy app:8080
+}

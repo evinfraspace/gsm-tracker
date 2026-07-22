@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: gsm-postgres
+    environment:
+      POSTGRES_DB: gsmtracker
+      POSTGRES_USER: gsm
+      POSTGRES_PASSWORD: gsm
+    ports:
+      - "5430:5432"
+    volumes:
+      - gsm-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gsm -d gsmtracker"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  gsm-pgdata:
