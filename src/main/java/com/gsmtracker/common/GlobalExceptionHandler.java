@@ -13,8 +13,8 @@ import java.util.stream.Collectors;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
-    @ExceptionHandler(DeviceNotFoundException.class)
-    public ResponseEntity<ApiError> handleNotFound(DeviceNotFoundException ex, HttpServletRequest request) {
+    @ExceptionHandler({DeviceNotFoundException.class, TripNotFoundException.class})
+    public ResponseEntity<ApiError> handleNotFound(RuntimeException ex, HttpServletRequest request) {
         return build(HttpStatus.NOT_FOUND, ex.getMessage(), request);
     }
 

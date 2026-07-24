@@ -19,7 +19,17 @@
         }
         button { background: #2563eb; color: #fff; border: none; cursor: pointer; }
         #status { font-size: 12px; color: #9ca3af; margin-left: auto; }
+        #main { flex: 1; display: flex; min-height: 0; }
+        #sidebar { width: 300px; overflow-y: auto; border-right: 1px solid #e5e7eb; background: #f9fafb; }
         #map { flex: 1; }
+        .trip {
+            padding: 10px 12px; border-bottom: 1px solid #e5e7eb; cursor: pointer;
+        }
+        .trip:hover { background: #eef2ff; }
+        .trip.active { background: #dbeafe; border-left: 4px solid #2563eb; }
+        .trip .title { font-weight: 600; font-size: 14px; margin-bottom: 2px; }
+        .trip .meta { font-size: 12px; color: #4b5563; }
+        .empty { padding: 12px; font-size: 13px; color: #6b7280; }
     </style>
 </head>
 <body>
@@ -32,10 +42,16 @@
         <label>Часов истории:
             <input id="hours" type="number" value="24" min="1" max="720" style="width: 64px"/>
         </label>
+        <label>Пауза (мин):
+            <input id="gap" type="number" value="5" min="1" max="240" style="width: 56px"/>
+        </label>
         <button id="reload">Обновить</button>
         <span id="status"></span>
     </header>
-    <div id="map"></div>
+    <div id="main">
+        <div id="sidebar"></div>
+        <div id="map"></div>
+    </div>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -46,14 +62,27 @@
         attribution: '&copy; OpenStreetMap'
     }).addTo(map);
 
-    let trackLayer = null;
-    let marker = null;
+    let tripLayer = null;
+    let startMarker = null;
+    let endMarker = null;
+    let activeIndex = null;
 
     const deviceSelect = document.getElementById('device');
     const hoursInput = document.getElementById('hours');
+    const gapInput = document.getElementById('gap');
     const statusEl = document.getElementById('status');
+    const sidebar = document.getElementById('sidebar');
 
-    function setStatus(text) { statusEl.textContent = text; }
+    const setStatus = (t) => { statusEl.textContent = t; };
+
+    function timeRange() {
+        const hours = Number(hoursInput.value) || 24;
+        const to = new Date();
+        const from = new Date(to.getTime() - hours * 3600 * 1000);
+        return { from: from.toISOString(), to: to.toISOString() };
+    }
+
+    const fmtTime = (iso) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
     async function loadDevices() {
         const res = await fetch('/api/v1/devices');
@@ -72,48 +101,85 @@
         }
     }
 
-    function timeRange() {
-        const hours = Number(hoursInput.value) || 24;
-        const to = new Date();
-        const from = new Date(to.getTime() - hours * 3600 * 1000);
-        return { from: from.toISOString(), to: to.toISOString() };
-    }
-
     async function reload() {
         const id = deviceSelect.value;
         if (!id) return;
         const { from, to } = timeRange();
+        const gap = Number(gapInput.value) || 5;
+        clearTripLayers();
+        activeIndex = null;
 
         try {
-            const trackRes = await fetch(`/api/v1/devices/${id}/track?from=${from}&to=${to}`);
-            const geojson = await trackRes.json();
-            const coords = geojson.geometry.coordinates.map(c => [c[1], c[0]]); // [lat, lon]
-
-            if (trackLayer) map.removeLayer(trackLayer);
-            if (coords.length > 0) {
-                trackLayer = L.polyline(coords, { color: '#2563eb', weight: 4 }).addTo(map);
-                map.fitBounds(trackLayer.getBounds(), { padding: [30, 30] });
-            }
-
-            const latestRes = await fetch(`/api/v1/devices/${id}/positions/latest`);
-            if (latestRes.status === 200) {
-                const p = await latestRes.json();
-                const latlng = [p.lat, p.lon];
-                if (marker) map.removeLayer(marker);
-                marker = L.marker(latlng).addTo(map)
-                    .bindPopup(`Последняя точка<br>${new Date(p.recordedAt).toLocaleString()}`);
-                setStatus(`Точек: ${coords.length} · последняя: ${new Date(p.recordedAt).toLocaleString()}`);
-            } else {
-                setStatus(`Точек: ${coords.length} · последней позиции нет`);
+            const res = await fetch(`/api/v1/devices/${id}/trips?from=${from}&to=${to}&gapMinutes=${gap}`);
+            const trips = await res.json();
+            renderTripList(id, trips, from, to, gap);
+            setStatus(`Поездок: ${trips.length}`);
+            if (trips.length > 0) {
+                selectTrip(id, trips[0].index, from, to, gap);
             }
         } catch (e) {
             setStatus('Ошибка загрузки: ' + e.message);
         }
     }
 
+    function renderTripList(id, trips, from, to, gap) {
+        sidebar.innerHTML = '';
+        if (trips.length === 0) {
+            sidebar.innerHTML = '<div class="empty">Поездок за период нет</div>';
+            return;
+        }
+        for (const t of trips) {
+            const km = (t.distanceMeters / 1000).toFixed(1);
+            const min = Math.round(t.durationSeconds / 60);
+            const kmh = Math.round(t.avgSpeedMps * 3.6);
+            const el = document.createElement('div');
+            el.className = 'trip';
+            el.dataset.index = t.index;
+            el.innerHTML =
+                `<div class="title">Поездка #${t.index}</div>` +
+                `<div class="meta">${fmtTime(t.startedAt)} – ${fmtTime(t.endedAt)} · ` +
+                `${km} км · ${min} мин · ⌀ ${kmh} км/ч</div>`;
+            el.addEventListener('click', () => selectTrip(id, t.index, from, to, gap));
+            sidebar.appendChild(el);
+        }
+    }
+
+    function clearTripLayers() {
+        if (tripLayer) { map.removeLayer(tripLayer); tripLayer = null; }
+        if (startMarker) { map.removeLayer(startMarker); startMarker = null; }
+        if (endMarker) { map.removeLayer(endMarker); endMarker = null; }
+    }
+
+    async function selectTrip(id, index, from, to, gap) {
+        activeIndex = index;
+        for (const el of sidebar.querySelectorAll('.trip')) {
+            el.classList.toggle('active', Number(el.dataset.index) === index);
+        }
+
+        try {
+            const res = await fetch(
+                `/api/v1/devices/${id}/trips/${index}/track?from=${from}&to=${to}&gapMinutes=${gap}`);
+            const geojson = await res.json();
+            const coords = geojson.geometry.coordinates.map(c => [c[1], c[0]]); // [lat, lon]
+
+            clearTripLayers();
+            if (coords.length > 0) {
+                tripLayer = L.polyline(coords, { color: '#2563eb', weight: 5 }).addTo(map);
+                startMarker = L.circleMarker(coords[0], {
+                    radius: 7, color: '#16a34a', fillColor: '#16a34a', fillOpacity: 1
+                }).addTo(map).bindPopup('Старт');
+                endMarker = L.circleMarker(coords[coords.length - 1], {
+                    radius: 7, color: '#dc2626', fillColor: '#dc2626', fillOpacity: 1
+                }).addTo(map).bindPopup('Финиш');
+                map.fitBounds(tripLayer.getBounds(), { padding: [40, 40] });
+            }
+        } catch (e) {
+            setStatus('Ошибка загрузки маршрута: ' + e.message);
+        }
+    }
+
     document.getElementById('reload').addEventListener('click', reload);
     deviceSelect.addEventListener('change', reload);
-    setInterval(reload, 10000); // автообновление раз в 10 c
 
     loadDevices();
 </script>
