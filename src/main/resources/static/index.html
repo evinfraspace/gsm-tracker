@@ -89,6 +89,7 @@
     }
 
     const fmtTime = (iso) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const fmtDate = (iso) => new Date(iso).toLocaleDateString();
 
     async function loadDevices() {
         const res = await fetch('/api/v1/devices');
@@ -141,7 +142,7 @@
             el.className = 'trip';
             el.dataset.index = t.index;
             el.innerHTML =
-                `<div class="title">Поездка #${t.index}</div>` +
+                `<div class="title">Поездка #${t.index} · ${fmtDate(t.startedAt)}</div>` +
                 `<div class="meta">${fmtTime(t.startedAt)} – ${fmtTime(t.endedAt)} · ` +
                 `${km} км · ${min} мин · ⌀ ${kmh} км/ч</div>`;
             el.addEventListener('click', () => selectTrip(id, t.index, from, to));
