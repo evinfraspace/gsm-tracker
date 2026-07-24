@@ -52,9 +52,6 @@
         <label>Часов истории:
             <input id="hours" type="number" value="24" min="1" max="720" style="width: 64px"/>
         </label>
-        <label>Пауза (мин):
-            <input id="gap" type="number" value="5" min="1" max="240" style="width: 56px"/>
-        </label>
         <button id="reload">Обновить</button>
         <span id="status"></span>
     </header>
@@ -79,7 +76,6 @@
 
     const deviceSelect = document.getElementById('device');
     const hoursInput = document.getElementById('hours');
-    const gapInput = document.getElementById('gap');
     const statusEl = document.getElementById('status');
     const sidebar = document.getElementById('sidebar');
 
@@ -115,24 +111,23 @@
         const id = deviceSelect.value;
         if (!id) return;
         const { from, to } = timeRange();
-        const gap = Number(gapInput.value) || 5;
         clearTripLayers();
         activeIndex = null;
 
         try {
-            const res = await fetch(`/api/v1/devices/${id}/trips?from=${from}&to=${to}&gapMinutes=${gap}`);
+            const res = await fetch(`/api/v1/devices/${id}/trips?from=${from}&to=${to}`);
             const trips = await res.json();
-            renderTripList(id, trips, from, to, gap);
+            renderTripList(id, trips, from, to);
             setStatus(`Поездок: ${trips.length}`);
             if (trips.length > 0) {
-                selectTrip(id, trips[0].index, from, to, gap);
+                selectTrip(id, trips[0].index, from, to);
             }
         } catch (e) {
             setStatus('Ошибка загрузки: ' + e.message);
         }
     }
 
-    function renderTripList(id, trips, from, to, gap) {
+    function renderTripList(id, trips, from, to) {
         sidebar.innerHTML = '';
         if (trips.length === 0) {
             sidebar.innerHTML = '<div class="empty">Поездок за период нет</div>';
@@ -149,7 +144,7 @@
                 `<div class="title">Поездка #${t.index}</div>` +
                 `<div class="meta">${fmtTime(t.startedAt)} – ${fmtTime(t.endedAt)} · ` +
                 `${km} км · ${min} мин · ⌀ ${kmh} км/ч</div>`;
-            el.addEventListener('click', () => selectTrip(id, t.index, from, to, gap));
+            el.addEventListener('click', () => selectTrip(id, t.index, from, to));
             sidebar.appendChild(el);
         }
     }
@@ -160,7 +155,7 @@
         if (endMarker) { map.removeLayer(endMarker); endMarker = null; }
     }
 
-    async function selectTrip(id, index, from, to, gap) {
+    async function selectTrip(id, index, from, to) {
         activeIndex = index;
         for (const el of sidebar.querySelectorAll('.trip')) {
             el.classList.toggle('active', Number(el.dataset.index) === index);
@@ -168,7 +163,7 @@
 
         try {
             const res = await fetch(
-                `/api/v1/devices/${id}/trips/${index}/track?from=${from}&to=${to}&gapMinutes=${gap}`);
+                `/api/v1/devices/${id}/trips/${index}/track?from=${from}&to=${to}`);
             const geojson = await res.json();
             const coords = geojson.geometry.coordinates.map(c => [c[1], c[0]]); // [lat, lon]
 
@@ -190,6 +185,9 @@
 
     document.getElementById('reload').addEventListener('click', reload);
     deviceSelect.addEventListener('change', reload);
+    document.getElementById('reload').addEventListener('click', reload);
+    deviceSelect.addEventListener('change', reload);
+    hoursInput.addEventListener('change', reload);
 
     loadDevices();
 </script>
